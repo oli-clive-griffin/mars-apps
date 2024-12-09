@@ -1,0 +1,10 @@
+[project]
+name = "visualise-rms"
+version = "0.1.0"
+description = "RMS normalization visualization"
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "seaborn",
+]
