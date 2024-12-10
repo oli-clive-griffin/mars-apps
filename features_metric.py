@@ -68,7 +68,6 @@ if __name__ == "__main__":
         (random_sparse(), "independent random sparse vector"),
         (one_copied_feature(), "one feature copied from the previous feature"),
     ]:
-
         y_ND, x_ND = examples
         print(name)
         xtoy = directional_thing(y_ND, x_ND)

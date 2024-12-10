@@ -1,7 +1,7 @@
 [project]
-name = "visualise-rms"
+name = ""
 version = "0.1.0"
-description = "RMS normalization visualization"
+description = ""
 requires-python = ">=3.8"
 dependencies = [
     "numpy",

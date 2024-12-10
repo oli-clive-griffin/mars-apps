@@ -14,13 +14,11 @@ from transformer_lens import HookedTransformer  # type: ignore
 from datasets import load_dataset  # type: ignore
 from transformers import AutoTokenizer  # type: ignore
 
-CACHE_DIR = "tmp/cache"
-DATASET = "PleIAs/common_corpus"
 
-
-class Dataset:
+class DataLoader:
     def __init__(
         self,
+        hf_dataset_name: str,
         tokenizer: AutoTokenizer,
         sequence_length: int,
         llm_batch_size: int,
@@ -28,7 +26,7 @@ class Dataset:
         self._tokenizer = tokenizer
         self._sequence_length = sequence_length
         self._llm_batch_size = llm_batch_size
-        self._dataset = load_dataset(DATASET, streaming=True, cache_dir=CACHE_DIR)
+        self._dataset = load_dataset(hf_dataset_name, streaming=True)
 
     def __len__(self):
         return len(self._dataset["train"])
@@ -116,37 +114,44 @@ GB_bytes = 2**30
 DATA_DIR = Path("data")
 
 
+
 def main():
-    POST_LAYER = 6
+    hf_dataset_name = "roneneldan/TinyStories"
+    # hf_dataset_name = "PleIAs/common_corpus"
+    layer = 6
 
     model = HookedTransformer.from_pretrained("gpt2")
-    dataset = Dataset(
+    dataloader = DataLoader(
+        hf_dataset_name=hf_dataset_name,
         tokenizer=model.tokenizer,
         sequence_length=128,
         llm_batch_size=128,
     )
     accumulator = ActivationAccumulator(
-        size_bytes=10 * GB_bytes,
+        size_bytes=2 * GB_bytes,
         dtype=np.float32,
         sequence_length=128,
         d_model=model.cfg.d_model,
     )
 
-    hookname = f"blocks.{POST_LAYER}.hook_resid_post"
+    # hookname = f"blocks.{layer}.hook_resid_post"
+    # hookname = f"blocks.{layer}.ln2.hook_normalized"
+    hookname = f"blocks.{layer}.ln2.hook_scale"
+
+    exp_dir = DATA_DIR / hf_dataset_name / hookname
+    exp_dir.mkdir(parents=True, exist_ok=True)
 
     with torch.no_grad():
-        i = 0
-        for sequence_BS in tqdm(dataset, desc="Computing activations"):
+        for i, sequence_BS in tqdm(enumerate(dataloader), desc="Computing activations"):
             _, cache = model.run_with_cache(
                 sequence_BS, names_filter=lambda name: name == hookname
             )
             activations_NSD = cache[hookname]
             accumulator.add_batch(activations_NSD.detach().cpu().numpy())
             if (i + 1) % 10 == 0:
-                accumulator.save(DATA_DIR / f"activations{i}.npy")
-            i += 1
+                accumulator.save(exp_dir / f"activations{i}.npy")
 
-    accumulator.save(DATA_DIR / "activations_final.npy")
+    accumulator.save(exp_dir / "activations_final.npy")
 
 
 if __name__ == "__main__":
