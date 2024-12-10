@@ -2,22 +2,30 @@ from einops import rearrange
 import numpy as np
 from scipy.special import logsumexp
 
-np.set_printoptions(precision=2, suppress=True)
+np.set_printoptions(precision=4, suppress=True)
 
 SPARSITY = 0.1
 
 # synthetic activation generation
 
-def exact_same_features(N: int = 50, D: int = 10):
-    x_ND = (np.random.random((N, D)) > SPARSITY).astype(int)
+def exact_same_features(N: int = 50, D: int = 10, sparsity: float = SPARSITY):
+    x_ND = (np.random.random((N, D)) > sparsity).astype(int)
     # permute the features randomly
     # a good metric must be order invariant
     perm = np.random.permutation(D)
     y_ND = x_ND[:, perm]
     return x_ND, y_ND
 
-def one_copied_feature(N: int = 50, D: int = 10):
-    x_ND = (np.random.random((N, D)) > SPARSITY).astype(int)
+def no_overlap(N: int = 50, D: int = 10, sparsity: float = SPARSITY):
+    assert N % 2 == 0, "N must be even"
+    x_ND = np.zeros((N, D))
+    halfway = N // 2
+    x_ND[halfway:, :] = 1
+    y_ND = 1 - x_ND
+    return x_ND, y_ND
+
+def one_copied_feature(N: int = 50, D: int = 10, sparsity: float = SPARSITY):
+    x_ND = (np.random.random((N, D)) > sparsity).astype(int)
 
     # copy one feature from the previous feature into all features in y
     idx = np.random.randint(D)
@@ -26,15 +34,13 @@ def one_copied_feature(N: int = 50, D: int = 10):
 
     return x_ND, y_ND
 
-def random_sparse(N: int = 50, D: int = 10):
-    x_ND = (np.random.random((N, D)) > SPARSITY).astype(int)
-    y_ND = (np.random.random((N, D)) > SPARSITY).astype(int)
+def random_sparse(N: int = 50, D: int = 10, sparsity: float = SPARSITY):
+    x_ND = (np.random.random((N, D)) > sparsity).astype(int)
+    y_ND = (np.random.random((N, D)) > sparsity).astype(int)
     return x_ND, y_ND
 
 
-# utils
-
-def pairwise_soft_jaccard(x_ND: np.ndarray, y_ND: np.ndarray) -> float:
+def pairwise_soft_jaccard(x_ND: np.ndarray, y_ND: np.ndarray) -> np.ndarray:
     x_ND1 = rearrange(x_ND, "n d -> n d 1")
     y_N1D = rearrange(y_ND, "n d -> n 1 d")
     intersection_DxDy = np.minimum(x_ND1, y_N1D).sum(axis=0)
@@ -54,22 +60,68 @@ def entropy(p: np.ndarray, axis: int = -1, epsilon: float = 1e-15) -> float:
     p_safe_ND = p + epsilon
     return -np.sum(p_safe_ND * np.log(p_safe_ND), axis=axis)
 
-def directional_thing(y_ND: np.ndarray, x_ND: np.ndarray):
+def mean_jaccard_entropy(x_ND: np.ndarray, y_ND: np.ndarray):
+    # for each pair of features jaccard similarity of activations across examples
     pairwise_jaccard_similarity_DD = pairwise_soft_jaccard(x_ND, y_ND)
-    acc_sm_DD = softmax(pairwise_jaccard_similarity_DD * 50)
 
+    # softmax over one feature dimension. This means something like:
+    # For each feature in y, 
+    acc_sm_DD = softmax(pairwise_jaccard_similarity_DD * 50)
     entropy_N = entropy(acc_sm_DD)
-    mean_entropy = np.mean(entropy_N)
-    return mean_entropy
+
+    return np.mean(entropy_N)
 
 if __name__ == "__main__":
-    for examples, name in [
-        (exact_same_features(), "exact same features, shuffled across feature dimension"),
-        (random_sparse(), "independent random sparse vector"),
-        (one_copied_feature(), "one feature copied from the previous feature"),
-    ]:
-        y_ND, x_ND = examples
-        print(name)
-        xtoy = directional_thing(y_ND, x_ND)
-        ytox = directional_thing(x_ND, y_ND)
-        print(f"{xtoy:.2f}, {ytox:.2f}")
+    # kwargs = {
+    #     "N": 10,
+    #     "D": 16_768,
+    #     "sparsity": 100 / 16_768,
+    # }
+    # for examples, name in [
+    #     (exact_same_features(**kwargs), "exact same features, shuffled across feature dimension"), # type: ignore
+    #     (random_sparse(**kwargs), "independent random sparse vector"), # type: ignore
+    #     (one_copied_feature(**kwargs), "one feature copied from the previous feature"), # type: ignore
+    #     (no_overlap(**kwargs), "no overlap"), # type: ignore
+    # ]:
+    #     y_ND, x_ND = examples
+    #     print(name)
+
+    #     # xtoy = directional_thing(y_ND, x_ND)
+    #     # ytox = directional_thing(x_ND, y_ND)
+    #     # print(f"x -> y: {xtoy:.4f}, y -> x: {ytox:.4f}")
+    #     # note: this is producing 2.3026 for no the no overlap case (this is the entropy of a uniform distribution over 10 features, or log(10))
+    #     # print(entropy(np.expand_dims(np.ones((10,)) / 10, axis=0)))
+
+    #     # xtoy = directional_thing_mean(y_ND, x_ND)
+    #     # ytox = directional_thing_mean(x_ND, y_ND)
+    #     # print(f"x -> y: {xtoy:.4f}, y -> x: {ytox:.4f}")
+
+    #     xtoy = mean_jaccard_entropy(y_ND, x_ND)
+    #     ytox = mean_jaccard_entropy(x_ND, y_ND)
+    #     print(f"x -> y: {xtoy:.4f}, y -> x: {ytox:.4f}")
+
+    #     print()
+
+
+    print(entropy(softmax(np.expand_dims(np.ones((16_768,)), axis=0))))
+
+    base = np.zeros((16_768,))
+    base[:100] = 1
+    print(entropy(softmax(np.expand_dims(base, axis=0))))
+
+    base = np.zeros((16_768,))
+    base[0] = 1
+    print(entropy(softmax(np.expand_dims(base, axis=0))))
+
+    asdf = softmax(np.expand_dims(np.array([1, 0, 0, 0]), axis=0) * np.sqrt(4))
+    print(asdf)
+    print(entropy(asdf))
+
+    asdf = softmax(np.expand_dims(np.array([1, 0, 0, 0, 0]), axis=0) * np.sqrt(5))
+    print(asdf)
+    print(entropy(asdf))
+
+    asdf = softmax(np.expand_dims(np.array([1, 0, 0, 0, 0, 0, 0, 0, 0, 0]), axis=0) * np.sqrt(10))
+    print(asdf)
+    print(entropy(asdf))
+
